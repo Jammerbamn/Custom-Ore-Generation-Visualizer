@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set SRC=src\main\java\com\example\cogveins
+set SRC=src\main\java\com\jammerbam\cogvisualizer
 set OUT=build\classes
 if not exist "%OUT%" mkdir "%OUT%"
 javac -source 1.8 -target 1.8 -d "%OUT%" ^
@@ -16,4 +16,4 @@ javac -source 1.8 -target 1.8 -d "%OUT%" ^
   "%SRC%\DefinitionXmlWriter.java" ^
   "%SRC%\GeneratorSmokeTest.java"
 if errorlevel 1 exit /b %errorlevel%
-java -cp "%OUT%" com.example.cogveins.GeneratorSmokeTest
+java -cp "%OUT%" com.jammerbam.cogvisualizer.GeneratorSmokeTest

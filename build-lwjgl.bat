@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set SRC=src\main\java\com\example\cogveins
+set SRC=src\main\java\com\jammerbam\cogvisualizer
 set OUT=build\lwjgl-classes
 if not exist "%OUT%" mkdir "%OUT%"
 javac -source 1.8 -target 1.8 -cp "lib\*" -d "%OUT%" ^

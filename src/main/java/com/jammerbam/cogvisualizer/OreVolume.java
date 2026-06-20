@@ -1,4 +1,4 @@
-package com.example.cogveins;
+package com.jammerbam.cogvisualizer;
 
 import java.util.Arrays;
 

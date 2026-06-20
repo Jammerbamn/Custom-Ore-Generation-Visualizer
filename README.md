@@ -32,23 +32,6 @@ For a non-UI generator smoke test:
 build-core.bat
 ```
 
-## Project Layout
-
-```text
-src/main/java/com/example/cogveins/
-  LwjglOreVeinVisualizerApp.java  Swing + LWJGL/OpenGL app
-  CogXmlLoader.java               COG-style XML loading
-  DefinitionXmlWriter.java        COG-style XML writing
-  VeinDefinition.java             Distribution settings model
-  BiomeGateEntry.java             COG biome gate model
-  OreBlockDefinition.java         Weighted ore model
-  OreVeinGenerator.java           COG-inspired voxel generator
-  OreVolume.java                  3D block/ore array
-  PDist.java                      Probability distribution helper
-  Vec3.java                       Small vector helper
-  GeneratorSmokeTest.java         Headless generator smoke test
-```
-
 ## Notes
 
 - The viewer does not require Minecraft to launch.

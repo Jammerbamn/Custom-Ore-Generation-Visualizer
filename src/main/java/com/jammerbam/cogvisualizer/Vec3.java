@@ -1,4 +1,4 @@
-package com.example.cogveins;
+package com.jammerbam.cogvisualizer;
 
 final class Vec3 {
     final double x;

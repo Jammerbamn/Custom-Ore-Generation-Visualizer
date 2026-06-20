@@ -1,0 +1,66 @@
+# Custom Ore Vein Visualizer
+
+Standalone Java desktop application for visualizing Minecraft CustomOreGen-style ore veins without launching Minecraft.
+
+The app uses Swing for the editor/browser UI and LWJGL/OpenGL for the 3D viewport. It targets Java 8-compatible source and bundles the LWJGL jars and Windows natives in `lib/`.
+
+## Features
+
+- Load CustomOreGen `.xml` files from the built-in file browser.
+- Check multiple XML files and select top-level distributions from the dropdown.
+- Render single veins, stacked veins, and region frequency views.
+- Switch region view between 3D and 2D top-down.
+- Rotate, zoom, and pan the viewport.
+- Show axes, chunk grid lines, and major 32x32 chunk region lines.
+- Optional ground cutoff grid.
+- XML editor with add/remove parent veins, nested child veins, optional settings, ore weights, ore colors, biome gates, and editable XML preview.
+- Ore dictionary and biome dictionary tabs with JSON save/load.
+- Export render/context data for AI-assisted vein tuning.
+
+The generation math is based on the CustomOreGen source, especially `MapGenOreDistribution`, `MapGenVeins`, `MapGenCloud`, and `PDist`.
+
+## Run
+
+```bat
+build-lwjgl.bat
+run-lwjgl.bat
+```
+
+For a non-UI generator smoke test:
+
+```bat
+build-core.bat
+```
+
+## Project Layout
+
+```text
+src/main/java/com/example/cogveins/
+  LwjglOreVeinVisualizerApp.java  Swing + LWJGL/OpenGL app
+  CogXmlLoader.java               COG-style XML loading
+  DefinitionXmlWriter.java        COG-style XML writing
+  VeinDefinition.java             Distribution settings model
+  BiomeGateEntry.java             COG biome gate model
+  OreBlockDefinition.java         Weighted ore model
+  OreVeinGenerator.java           COG-inspired voxel generator
+  OreVolume.java                  3D block/ore array
+  PDist.java                      Probability distribution helper
+  Vec3.java                       Small vector helper
+  GeneratorSmokeTest.java         Headless generator smoke test
+```
+
+## Notes
+
+- The viewer does not require Minecraft to launch.
+- Biome gates are represented in XML/editor data, but the viewer does not simulate real biome maps yet.
+- The frequency view samples region placement; low frequencies can need several regions before differences are visually obvious.
+
+## GitHub Publishing Notes
+
+This repository intentionally keeps the project simple:
+
+- Java source lives under `src/main/java`.
+- LWJGL jars and Windows natives are bundled in `lib/` so Windows users can build/run without Gradle or Maven.
+- Generated classes in `build/`, IntelliJ project state in `.idea/`, and exported render reports are ignored by git.
+
+Before making the repo public, choose a license and add it as `LICENSE` if you want others to be able to reuse or modify the code.

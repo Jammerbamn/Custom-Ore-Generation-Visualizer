@@ -1,0 +1,18 @@
+# Build output
+/build/
+*.class
+
+# IntelliJ / local IDE state
+/.idea/
+*.iml
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Exported render reports can get large and are user-local artifacts.
+rendered-veins-render-context.json
+*-render-context.json
+exports/

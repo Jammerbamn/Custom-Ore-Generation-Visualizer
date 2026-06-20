@@ -1,6 +1,7 @@
 package com.jammerbam.cogvisualizer;
 
 import java.awt.BorderLayout;
+import java.awt.AWTEvent;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -9,6 +10,7 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Component;
+import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentAdapter;
@@ -157,6 +159,7 @@ public final class LwjglOreVeinVisualizerApp {
                 installDarkDefaults();
                 ToolTipManager.sharedInstance().setInitialDelay(1000);
                 ToolTipManager.sharedInstance().setDismissDelay(20000);
+                ToolTipManager.sharedInstance().setLightWeightPopupEnabled(false);
                 new LwjglOreVeinVisualizerApp().show();
             }
         });
@@ -218,6 +221,7 @@ public final class LwjglOreVeinVisualizerApp {
         frame.add(createFileBrowser(frame), BorderLayout.WEST);
         frame.add(createSidePanel(), BorderLayout.EAST);
         installShortcuts(frame);
+        installTooltipViewportRepaint(frame);
         frame.setSize(1280, 820);
         frame.setLocationRelativeTo(null);
         applyDarkTheme(frame);
@@ -235,6 +239,37 @@ public final class LwjglOreVeinVisualizerApp {
                 saveSelectedDistributionXml(frame);
             }
         });
+    }
+
+    private void installTooltipViewportRepaint(final JFrame frame) {
+        final Timer tooltipRepaintTimer = new Timer(90, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                viewport.refreshNow();
+            }
+        });
+        tooltipRepaintTimer.setRepeats(false);
+        Toolkit.getDefaultToolkit().addAWTEventListener(new java.awt.event.AWTEventListener() {
+            @Override
+            public void eventDispatched(AWTEvent event) {
+                if (!(event instanceof MouseEvent)) {
+                    return;
+                }
+                MouseEvent mouseEvent = (MouseEvent) event;
+                int id = mouseEvent.getID();
+                if (id != MouseEvent.MOUSE_MOVED && id != MouseEvent.MOUSE_EXITED
+                        && id != MouseEvent.MOUSE_ENTERED) {
+                    return;
+                }
+                Object source = mouseEvent.getSource();
+                if (!(source instanceof Component) || source == viewport) {
+                    return;
+                }
+                if (SwingUtilities.getWindowAncestor((Component) source) == frame) {
+                    tooltipRepaintTimer.restart();
+                }
+            }
+        }, AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
     }
 
     private JPanel createToolbar(final JFrame frame) {
@@ -4077,6 +4112,10 @@ public final class LwjglOreVeinVisualizerApp {
         }
 
         void invalidateDisplayList() {
+            render();
+        }
+
+        void refreshNow() {
             render();
         }
 

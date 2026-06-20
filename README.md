@@ -55,12 +55,12 @@ src/main/java/com/example/cogveins/
 - Biome gates are represented in XML/editor data, but the viewer does not simulate real biome maps yet.
 - The frequency view samples region placement; low frequencies can need several regions before differences are visually obvious.
 
-## GitHub Publishing Notes
+## Development Note
 
-This repository intentionally keeps the project simple:
+This project was developed with the help of AI-assisted coding tools.
+
+The repository intentionally keeps the project simple:
 
 - Java source lives under `src/main/java`.
 - LWJGL jars and Windows natives are bundled in `lib/` so Windows users can build/run without Gradle or Maven.
 - Generated classes in `build/`, IntelliJ project state in `.idea/`, and exported render reports are ignored by git.
-
-Before making the repo public, choose a license and add it as `LICENSE` if you want others to be able to reuse or modify the code.

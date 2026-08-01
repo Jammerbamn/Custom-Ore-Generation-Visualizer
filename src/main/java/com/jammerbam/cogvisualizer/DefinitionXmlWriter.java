@@ -21,12 +21,14 @@ final class DefinitionXmlWriter {
 
     private static String writeConfig(List<VeinDefinition> definitions, boolean normalizeOreWeights) {
         StringBuilder xml = new StringBuilder();
+        xml.append("<ConfigSection>\n");
         for (VeinDefinition def : definitions) {
-            if (xml.length() > 0) {
+            if (xml.length() > "<ConfigSection>\n".length()) {
                 xml.append("\n");
             }
             xml.append(write(def, 0, normalizeOreWeights));
         }
+        xml.append("</ConfigSection>\n");
         return xml.toString();
     }
 

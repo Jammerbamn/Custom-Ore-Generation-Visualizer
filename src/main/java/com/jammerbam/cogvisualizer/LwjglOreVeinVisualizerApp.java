@@ -25,6 +25,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -321,6 +322,11 @@ public final class LwjglOreVeinVisualizerApp {
         JButton loadXml = new JButton("Load XML");
         JButton exportRender = new JButton("Export Render");
         JButton randomSeed = new JButton("Random Seed");
+        forceHeavyWeightPopup(distributionBox);
+        forceHeavyWeightPopup(modeBox);
+        forceHeavyWeightPopup(regionViewBox);
+        forceHeavyWeightPopup(regionBiomeBox);
+        forceHeavyWeightPopup(renderDetailBox);
         distributionBox.setLightWeightPopupEnabled(false);
         modeBox.setLightWeightPopupEnabled(false);
         regionViewBox.setLightWeightPopupEnabled(false);
@@ -442,6 +448,17 @@ public final class LwjglOreVeinVisualizerApp {
         toolbar.add(groundYField);
         toolbar.add(statusLabel);
         return toolbar;
+    }
+
+    private static void forceHeavyWeightPopup(JComponent component) {
+        try {
+            Class<?> keyClass = Class.forName("javax.swing.ClientPropertyKey");
+            Field keyField = keyClass.getDeclaredField("PopupFactory_FORCE_HEAVYWEIGHT_POPUP");
+            keyField.setAccessible(true);
+            component.putClientProperty(keyField.get(null), Boolean.TRUE);
+        } catch (Exception ignored) {
+            // Java runtimes without this hook still use the heavyweight-popup fallbacks above.
+        }
     }
 
     private JPanel createSidePanel() {

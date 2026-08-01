@@ -61,6 +61,7 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.Popup;
 import javax.swing.PopupFactory;
 import javax.swing.JScrollPane;
@@ -177,6 +178,7 @@ public final class LwjglOreVeinVisualizerApp {
             @Override
             public void run() {
                 installDarkDefaults();
+                JPopupMenu.setDefaultLightWeightPopupEnabled(false);
                 ToolTipManager.sharedInstance().setInitialDelay(1000);
                 ToolTipManager.sharedInstance().setDismissDelay(20000);
                 ToolTipManager.sharedInstance().setLightWeightPopupEnabled(false);

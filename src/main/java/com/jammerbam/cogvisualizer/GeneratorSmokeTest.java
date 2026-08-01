@@ -32,6 +32,9 @@ public final class GeneratorSmokeTest {
         partialWeights.oreBlocks.add(new OreBlockDefinition("minecraft:iron_ore", 0.6));
         partialWeights.oreBlocks.add(new OreBlockDefinition("minecraft:gold_ore", 0.2));
         String savedXml = DefinitionXmlWriter.writeConfigForSave(java.util.Collections.singletonList(partialWeights));
+        if (!savedXml.startsWith("<ConfigSection>") || !savedXml.trim().endsWith("</ConfigSection>")) {
+            throw new IllegalStateException("Expected saved XML config to include ConfigSection wrapper");
+        }
         if (savedXml.indexOf("weight=\"0.7\"") < 0 || savedXml.indexOf("weight=\"0.3\"") < 0) {
             throw new IllegalStateException("Expected save XML to distribute missing ore weight to 100%");
         }

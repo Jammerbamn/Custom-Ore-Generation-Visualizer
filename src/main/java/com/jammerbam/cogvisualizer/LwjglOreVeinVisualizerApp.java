@@ -1,7 +1,6 @@
 package com.jammerbam.cogvisualizer;
 
 import java.awt.BorderLayout;
-import java.awt.AWTEvent;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -10,7 +9,6 @@ import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.Component;
-import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentAdapter;
@@ -59,6 +57,8 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.Popup;
+import javax.swing.PopupFactory;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.Scrollable;
@@ -89,8 +89,9 @@ public final class LwjglOreVeinVisualizerApp {
     private static final Color APP_BG = new Color(18, 20, 24);
     private static final Color PANEL_BG = new Color(23, 29, 37);
     private static final Color CONTROL_BG = new Color(31, 39, 49);
-    private static final Color CONTROL_FG = new Color(230, 236, 245);
-    private static final Color MUTED_FG = new Color(165, 176, 190);
+    private static final Color CONTROL_FG = new Color(238, 243, 250);
+    private static final Color MUTED_FG = new Color(203, 213, 225);
+    private static final Color DISABLED_FG = new Color(181, 192, 205);
     private static final Color BORDER_COLOR = new Color(48, 59, 72);
     private static final String PREF_EXPORT_FOLDER = "lwjglExportFolder";
     private static final String PREF_BIOME_DICTIONARY_FILE = "lwjglBiomeDictionaryFile";
@@ -242,34 +243,48 @@ public final class LwjglOreVeinVisualizerApp {
     }
 
     private void installTooltipViewportRepaint(final JFrame frame) {
-        final Timer tooltipRepaintTimer = new Timer(90, new ActionListener() {
+        final PopupFactory delegate = PopupFactory.getSharedInstance();
+        PopupFactory.setSharedInstance(new PopupFactory() {
+            @Override
+            public Popup getPopup(Component owner, Component contents, int x, int y) throws IllegalArgumentException {
+                final Popup popup = delegate.getPopup(owner, contents, x, y);
+                final boolean repaintViewport = owner != null
+                        && owner != viewport
+                        && SwingUtilities.getWindowAncestor(owner) == frame;
+                return new Popup() {
+                    @Override
+                    public void show() {
+                        popup.show();
+                    }
+
+                    @Override
+                    public void hide() {
+                        popup.hide();
+                        if (repaintViewport) {
+                            repaintViewportAfterPopup();
+                        }
+                    }
+                };
+            }
+        });
+    }
+
+    private void repaintViewportAfterPopup() {
+        viewport.refreshNow();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                viewport.refreshNow();
+            }
+        });
+        Timer cleanup = new Timer(70, new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
                 viewport.refreshNow();
             }
         });
-        tooltipRepaintTimer.setRepeats(false);
-        Toolkit.getDefaultToolkit().addAWTEventListener(new java.awt.event.AWTEventListener() {
-            @Override
-            public void eventDispatched(AWTEvent event) {
-                if (!(event instanceof MouseEvent)) {
-                    return;
-                }
-                MouseEvent mouseEvent = (MouseEvent) event;
-                int id = mouseEvent.getID();
-                if (id != MouseEvent.MOUSE_MOVED && id != MouseEvent.MOUSE_EXITED
-                        && id != MouseEvent.MOUSE_ENTERED) {
-                    return;
-                }
-                Object source = mouseEvent.getSource();
-                if (!(source instanceof Component) || source == viewport) {
-                    return;
-                }
-                if (SwingUtilities.getWindowAncestor((Component) source) == frame) {
-                    tooltipRepaintTimer.restart();
-                }
-            }
-        }, AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
+        cleanup.setRepeats(false);
+        cleanup.start();
     }
 
     private JPanel createToolbar(final JFrame frame) {
@@ -394,14 +409,14 @@ public final class LwjglOreVeinVisualizerApp {
     private JPanel createSidePanel() {
         statsArea.setEditable(false);
         statsArea.setBackground(new Color(24, 27, 32));
-        statsArea.setForeground(new Color(230, 236, 245));
+        statsArea.setForeground(CONTROL_FG);
         statsArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         JPanel panel = new JPanel(new BorderLayout());
         panel.setPreferredSize(new Dimension(SIDE_PANEL_WIDTH, 0));
         panel.setMinimumSize(new Dimension(SIDE_PANEL_WIDTH, 0));
 
         xmlPreview.setBackground(new Color(24, 27, 32));
-        xmlPreview.setForeground(new Color(230, 236, 245));
+        xmlPreview.setForeground(CONTROL_FG);
         xmlPreview.setCaretColor(Color.WHITE);
         xmlPreview.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         xmlPreview.setFont(new java.awt.Font("Consolas", java.awt.Font.PLAIN, 12));
@@ -1867,9 +1882,12 @@ public final class LwjglOreVeinVisualizerApp {
         JPanel content = new JPanel();
         content.setLayout(new javax.swing.BoxLayout(content, javax.swing.BoxLayout.Y_AXIS));
         content.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        content.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         JLabel title = new JLabel("Ore Dictionary");
+        title.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         content.add(title);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        actions.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
         JButton saveDictionary = new JButton("Save Dictionary");
         JButton loadDictionary = new JButton("Load Dictionary");
         saveDictionary.addActionListener(new ActionListener() {
@@ -1890,17 +1908,24 @@ public final class LwjglOreVeinVisualizerApp {
         });
         actions.add(saveDictionary);
         actions.add(loadDictionary);
+        actions.setMaximumSize(actions.getPreferredSize());
         content.add(actions);
         for (int i = 0; i < oreDictionary.size(); i++) {
             final int index = i;
             final OreDictionaryEntry entry = oreDictionary.get(i);
-            final JTextField name = textField(entry.name, 10);
-            final JTextField block = textField(entry.block, 16);
+            final JTextField name = compactTextField(entry.name, 10);
+            final JTextField block = compactTextField(entry.block, 16);
             JButton color = new JButton("  ");
             color.setPreferredSize(new Dimension(34, 22));
+            color.setMinimumSize(new Dimension(34, 22));
+            color.setMaximumSize(new Dimension(34, 22));
             color.setBackground(colorForDictionaryEntry(entry));
             color.setOpaque(true);
             JButton remove = new JButton("-");
+            remove.setMargin(new java.awt.Insets(0, 0, 0, 0));
+            remove.setPreferredSize(new Dimension(24, 22));
+            remove.setMinimumSize(new Dimension(24, 22));
+            remove.setMaximumSize(new Dimension(24, 22));
             name.getDocument().addDocumentListener(changeListener(new Runnable() {
                 @Override public void run() {
                     entry.name = name.getText().trim();
@@ -1940,15 +1965,19 @@ public final class LwjglOreVeinVisualizerApp {
                 }
             });
             JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            row.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
             row.add(color);
             row.add(new JLabel("Name"));
             row.add(name);
             row.add(new JLabel("Block"));
             row.add(block);
             row.add(remove);
+            row.setMaximumSize(row.getPreferredSize());
             content.add(row);
         }
         JButton add = new JButton("Add Dictionary Ore");
+        add.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        add.setMaximumSize(add.getPreferredSize());
         add.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
@@ -1960,7 +1989,9 @@ public final class LwjglOreVeinVisualizerApp {
         });
         content.add(add);
         return new JPanel(new BorderLayout()) {{
-            add(new JScrollPane(content), BorderLayout.CENTER);
+            JScrollPane scroll = new JScrollPane(content);
+            scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            add(scroll, BorderLayout.CENTER);
         }};
     }
 
@@ -2484,8 +2515,12 @@ public final class LwjglOreVeinVisualizerApp {
         content.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
         final boolean collapsed = isCollapsed(target);
         final String role = depth == 0 ? "Mother Vein: " : "Child Vein: ";
+        TitledBorder titleBorder = new TitledBorder(role + target.nameForXml()
+                + "  freq " + format(target.distributionFrequency.mean));
+        titleBorder.setTitleColor(CONTROL_FG);
+        titleBorder.setBorder(BorderFactory.createLineBorder(BORDER_COLOR));
         content.setBorder(BorderFactory.createCompoundBorder(
-                new TitledBorder(role + target.nameForXml() + "  freq " + format(target.distributionFrequency.mean)),
+                titleBorder,
                 BorderFactory.createEmptyBorder(6, depth == 0 ? 6 : 14, 6, 6)));
 
         JPanel header = new JPanel(new BorderLayout(4, 0));
@@ -2494,6 +2529,7 @@ public final class LwjglOreVeinVisualizerApp {
         toggle.setPreferredSize(new Dimension(24, 22));
         toggle.setToolTipText(collapsed ? "Expand this vein." : "Collapse this vein.");
         JLabel headerLabel = new JLabel(target.nameForXml() + "  (" + (isCloud(target) ? "Cloud" : "Veins") + ")");
+        headerLabel.setForeground(CONTROL_FG);
         header.add(toggle, BorderLayout.WEST);
         header.add(headerLabel, BorderLayout.CENTER);
         header.setMaximumSize(new Dimension(Integer.MAX_VALUE, header.getPreferredSize().height));
@@ -2995,7 +3031,7 @@ public final class LwjglOreVeinVisualizerApp {
         box.add(addChild);
         if (root.children.isEmpty()) {
             JLabel none = new JLabel("None");
-            none.setForeground(Color.GRAY);
+            none.setForeground(MUTED_FG);
             box.add(none);
             box.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
             return box;
@@ -3859,24 +3895,39 @@ public final class LwjglOreVeinVisualizerApp {
     private static void installDarkDefaults() {
         UIManager.put("Panel.background", PANEL_BG);
         UIManager.put("Label.foreground", CONTROL_FG);
+        UIManager.put("Label.disabledForeground", DISABLED_FG);
         UIManager.put("Button.background", CONTROL_BG);
         UIManager.put("Button.foreground", CONTROL_FG);
+        UIManager.put("Button.disabledText", DISABLED_FG);
         UIManager.put("CheckBox.background", PANEL_BG);
         UIManager.put("CheckBox.foreground", CONTROL_FG);
+        UIManager.put("CheckBox.disabledText", DISABLED_FG);
         UIManager.put("ComboBox.background", CONTROL_BG);
         UIManager.put("ComboBox.foreground", CONTROL_FG);
+        UIManager.put("ComboBox.disabledForeground", DISABLED_FG);
         UIManager.put("TextField.background", CONTROL_BG);
         UIManager.put("TextField.foreground", CONTROL_FG);
         UIManager.put("TextField.caretForeground", CONTROL_FG);
+        UIManager.put("TextField.inactiveForeground", DISABLED_FG);
+        UIManager.put("TextField.disabledForeground", DISABLED_FG);
         UIManager.put("TextArea.background", CONTROL_BG);
         UIManager.put("TextArea.foreground", CONTROL_FG);
+        UIManager.put("TextArea.inactiveForeground", DISABLED_FG);
+        UIManager.put("TextArea.disabledForeground", DISABLED_FG);
         UIManager.put("TabbedPane.background", PANEL_BG);
         UIManager.put("TabbedPane.foreground", CONTROL_FG);
         UIManager.put("TabbedPane.selected", CONTROL_BG);
         UIManager.put("List.background", CONTROL_BG);
         UIManager.put("List.foreground", CONTROL_FG);
+        UIManager.put("List.selectionBackground", new Color(54, 72, 96));
+        UIManager.put("List.selectionForeground", Color.WHITE);
         UIManager.put("ScrollPane.background", PANEL_BG);
         UIManager.put("Viewport.background", PANEL_BG);
+        UIManager.put("OptionPane.background", PANEL_BG);
+        UIManager.put("OptionPane.messageForeground", CONTROL_FG);
+        UIManager.put("ToolTip.background", CONTROL_BG);
+        UIManager.put("ToolTip.foreground", CONTROL_FG);
+        UIManager.put("ToolTip.border", BorderFactory.createLineBorder(BORDER_COLOR));
     }
 
     private static void applyDarkTheme(Component component) {
@@ -3893,12 +3944,17 @@ public final class LwjglOreVeinVisualizerApp {
             field.setBackground(CONTROL_BG);
             field.setForeground(CONTROL_FG);
             field.setCaretColor(CONTROL_FG);
+            field.setDisabledTextColor(DISABLED_FG);
+            field.setSelectedTextColor(Color.WHITE);
+            field.setSelectionColor(new Color(57, 89, 132));
             field.setBorder(BorderFactory.createLineBorder(BORDER_COLOR));
         } else if (component instanceof JTextArea) {
             JTextArea area = (JTextArea) component;
             area.setBackground(CONTROL_BG);
             area.setForeground(CONTROL_FG);
             area.setCaretColor(CONTROL_FG);
+            area.setDisabledTextColor(DISABLED_FG);
+            area.setSelectedTextColor(Color.WHITE);
             area.setSelectionColor(new Color(57, 89, 132));
         } else if (component instanceof JCheckBox) {
             component.setBackground(PANEL_BG);
@@ -4684,7 +4740,7 @@ public final class LwjglOreVeinVisualizerApp {
                 setForeground(Color.WHITE);
             } else {
                 setBackground(new Color(24, 27, 32));
-                setForeground(new Color(230, 236, 245));
+                setForeground(CONTROL_FG);
             }
             return this;
         }

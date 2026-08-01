@@ -8,9 +8,11 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Component;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentAdapter;
@@ -24,6 +26,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -81,6 +84,20 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.awt.AWTGLCanvas;
 import org.lwjgl.opengl.awt.GLData;
+import org.lwjgl.opengl.awt.PlatformWin32GLCanvas;
+import org.lwjgl.system.APIUtil;
+import org.lwjgl.system.JNI;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.system.SharedLibrary;
+import org.lwjgl.system.jawt.JAWTDrawingSurface;
+import org.lwjgl.system.jawt.JAWTDrawingSurfaceInfo;
+import org.lwjgl.system.jawt.JAWTFunctions;
+import org.lwjgl.system.jawt.JAWTWin32DrawingSurfaceInfo;
+import org.lwjgl.system.windows.TOUCHINPUT;
+import org.lwjgl.system.windows.User32;
+import org.lwjgl.system.windows.WindowProc;
+import org.lwjgl.system.windows.WindowProcI;
 
 public final class LwjglOreVeinVisualizerApp {
     private static final int CHUNK_SIZE = 16;
@@ -121,6 +138,7 @@ public final class LwjglOreVeinVisualizerApp {
     private final JComboBox<VeinDefinition> distributionBox = new JComboBox<VeinDefinition>();
     private final JComboBox<String> modeBox = new JComboBox<String>(new String[] { "Single vein", "Region" });
     private final JComboBox<String> regionViewBox = new JComboBox<String>(new String[] { "3D", "2D top-down" });
+    private final JComboBox<String> regionBiomeBox = new JComboBox<String>(regionBiomeOptions());
     private final JComboBox<String> renderDetailBox = new JComboBox<String>(new String[] { "Auto", "Full cubes", "Fast points" });
     private final JTextField seedField = new JTextField(Long.toString(new Random().nextLong()), 18);
     private final JCheckBox stackAllBox = new JCheckBox("Stack all");
@@ -134,7 +152,7 @@ public final class LwjglOreVeinVisualizerApp {
     private final JPanel editorPanel = new JPanel(new BorderLayout());
     private final JPanel oreDictionaryPanel = new JPanel(new BorderLayout());
     private final JPanel biomeDictionaryPanel = new JPanel(new BorderLayout());
-    private final OpenGlViewport viewport = new OpenGlViewport();
+    private final OpenGlViewport viewport;
     private final DefaultListModel<File> fileListModel = new DefaultListModel<File>();
     private final JList<File> fileBrowser = new JList<File>(fileListModel);
     private final Set<File> checkedXmlFiles = new HashSet<File>();
@@ -194,7 +212,15 @@ public final class LwjglOreVeinVisualizerApp {
         return help;
     }
 
+    private static String[] regionBiomeOptions() {
+        String[] options = new String[BIOME_CATEGORIES.length + 1];
+        options[0] = "All biomes";
+        System.arraycopy(BIOME_CATEGORIES, 0, options, 1, BIOME_CATEGORIES.length);
+        return options;
+    }
+
     private LwjglOreVeinVisualizerApp() {
+        viewport = new OpenGlViewport();
         restoreBrowserRootPreference();
         loadOreDictionary();
         loadBiomeDictionary();
@@ -278,6 +304,7 @@ public final class LwjglOreVeinVisualizerApp {
         JButton exportRender = new JButton("Export Render");
         JButton randomSeed = new JButton("Random Seed");
         regionViewBox.setPreferredSize(new Dimension(105, 24));
+        regionBiomeBox.setPreferredSize(new Dimension(130, 24));
         renderDetailBox.setPreferredSize(new Dimension(100, 24));
         regionXField.setPreferredSize(new Dimension(40, 24));
         regionZField.setPreferredSize(new Dimension(40, 24));
@@ -289,6 +316,7 @@ public final class LwjglOreVeinVisualizerApp {
         };
         modeBox.addActionListener(redraw);
         regionViewBox.addActionListener(redraw);
+        regionBiomeBox.addActionListener(redraw);
         renderDetailBox.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
@@ -378,6 +406,8 @@ public final class LwjglOreVeinVisualizerApp {
         toolbar.add(modeBox);
         toolbar.add(new JLabel("Region View"));
         toolbar.add(regionViewBox);
+        toolbar.add(new JLabel("Biome"));
+        toolbar.add(regionBiomeBox);
         toolbar.add(new JLabel("Detail"));
         toolbar.add(renderDetailBox);
         toolbar.add(new JLabel("Regions"));
@@ -3130,6 +3160,14 @@ public final class LwjglOreVeinVisualizerApp {
         return "2D top-down".equals(regionViewBox.getSelectedItem());
     }
 
+    private String selectedRegionBiomeCategory() {
+        Object selected = regionBiomeBox == null ? null : regionBiomeBox.getSelectedItem();
+        if (selected == null || "All biomes".equals(selected)) {
+            return null;
+        }
+        return String.valueOf(selected);
+    }
+
     private RenderScene buildScene(List<VeinDefinition> roots, long seed) {
         long started = System.nanoTime();
         if (isRegionMode()) {
@@ -3262,6 +3300,7 @@ public final class LwjglOreVeinVisualizerApp {
     private RenderScene buildRegionScene(List<VeinDefinition> roots, long seed) {
         long started = System.nanoTime();
         boolean topDown = isRegionTopDown();
+        String biomeCategory = selectedRegionBiomeCategory();
         boolean groundEnabled = isGroundGridEnabled();
         int groundLevel = groundY();
         int regionsX = clampInt(parseEditorInt(regionXField.getText(), 1), 1, 8);
@@ -3283,31 +3322,41 @@ public final class LwjglOreVeinVisualizerApp {
 
         final List<RegionInstance> regionInstances = new ArrayList<RegionInstance>();
         Map<VeinDefinition, Integer> sampledByRoot = new IdentityHashMap<VeinDefinition, Integer>();
+        Map<VeinDefinition, Integer> acceptedByRoot = new IdentityHashMap<VeinDefinition, Integer>();
+        int rawSampledStructures = 0;
 
         for (int defIndex = 0; defIndex < roots.size(); defIndex++) {
             VeinDefinition root = roots.get(defIndex);
             int rootSampled = 0;
+            int rootAccepted = 0;
             for (int chunkX = 0; chunkX < chunksX; chunkX++) {
                 for (int chunkZ = 0; chunkZ < chunksZ; chunkZ++) {
                     Random random = cogStructureGroupRandom(root, seed, chunkX, chunkZ);
                     int count = cogStructureCount(root, random);
                     rootSampled += count;
+                    rawSampledStructures += count;
                     for (int i = 0; i < count; i++) {
                         long structureSeed = random.nextLong();
+                        if (!passesBiomeCategory(root, biomeCategory, structureSeed)) {
+                            continue;
+                        }
                         Random structureRandom = new Random(structureSeed);
                         double anchorX = (structureRandom.nextFloat() + chunkX) * CHUNK_SIZE;
                         double anchorZ = (structureRandom.nextFloat() + chunkZ) * CHUNK_SIZE;
                         regionInstances.add(new RegionInstance(root, defIndex, structureSeed, anchorX, anchorZ));
+                        rootAccepted++;
                     }
                 }
             }
             sampledByRoot.put(root, rootSampled);
+            acceptedByRoot.put(root, rootAccepted);
         }
 
         final int finalBlocksX = blocksX;
         final int finalBlocksZ = blocksZ;
         final int finalSceneSizeY = sceneSizeY;
         final boolean finalTopDown = topDown;
+        final String finalBiomeCategory = biomeCategory;
         final boolean finalGroundEnabled = groundEnabled;
         final int finalGroundLevel = groundLevel;
         int workerThreads = regionWorkerCount(regionInstances.size());
@@ -3328,7 +3377,8 @@ public final class LwjglOreVeinVisualizerApp {
                             RegionBuildResult result = new RegionBuildResult();
                             result.instances = appendRegionDefinitionTree(instance.root, instance.defIndex, instance.structureSeed,
                                     instance.anchorX, instance.anchorZ, result.voxels, result.oreCounts, result.definitionStats,
-                                    0, finalBlocksX, finalBlocksZ, finalSceneSizeY, finalTopDown, true, finalGroundEnabled, finalGroundLevel);
+                                    0, finalBlocksX, finalBlocksZ, finalSceneSizeY, finalTopDown, true, finalGroundEnabled, finalGroundLevel,
+                                    finalBiomeCategory, false);
                             return result;
                         }
                     });
@@ -3365,17 +3415,24 @@ public final class LwjglOreVeinVisualizerApp {
                 .append(" (").append((long) chunksX * (long) chunksZ).append(" total)\n");
         stats.append("Chunk size: ").append(CHUNK_SIZE).append(" x ").append(CHUNK_SIZE).append(" blocks\n");
         stats.append("COG frequency math: MapGenOreDistribution-compatible chunk seeding\n");
+        stats.append("Biome category: ").append(biomeCategory == null ? "All biomes" : biomeCategory).append("\n");
+        if (biomeCategory != null) {
+            stats.append("Biome weighting: COG-style summed BiomeType weights; regex Biome gates need a real biome map\n");
+        }
         stats.append("Region worker threads: ").append(workerThreads).append("\n");
         stats.append("Expected structures: ").append(format(expectedStructures)).append("\n");
-        stats.append("Sampled structures: ").append(sampledStructures).append("\n");
+        stats.append("Sampled structures before biome filter: ").append(rawSampledStructures).append("\n");
+        stats.append("Sampled structures after biome filter: ").append(sampledStructures).append("\n");
         stats.append("Per distribution frequency:\n");
         for (VeinDefinition root : roots) {
             double expectedForRoot = Math.max(0.0, root.distributionFrequency.mean) * (double) chunksX * (double) chunksZ;
             Integer sampledForRoot = sampledByRoot.get(root);
+            Integer acceptedForRoot = acceptedByRoot.get(root);
             stats.append("  ").append(root.nameForXml())
                     .append(": freq/chunk ").append(format(root.distributionFrequency.mean))
                     .append(", expected ").append(format(expectedForRoot))
                     .append(", sampled ").append(sampledForRoot == null ? 0 : sampledForRoot.intValue())
+                    .append(", after biome ").append(acceptedForRoot == null ? 0 : acceptedForRoot.intValue())
                     .append("\n");
         }
         stats.append("Rendered vein instances including children: ").append(totalInstances).append("\n");
@@ -3429,7 +3486,11 @@ public final class LwjglOreVeinVisualizerApp {
                                            List<Voxel> voxels, Map<String, Integer> totalOreCounts,
                                            List<DefinitionRenderStats> definitionStats, int depth,
                                            int blocksX, int blocksZ, int sceneSizeY, boolean topDown,
-                                           boolean afterCogPosition, boolean groundEnabled, int groundLevel) {
+                                           boolean afterCogPosition, boolean groundEnabled, int groundLevel,
+                                           String biomeCategory, boolean checkCurrentBiome) {
+        if (checkCurrentBiome && !passesBiomeCategory(def, biomeCategory, structureSeed)) {
+            return 0;
+        }
         VeinGenerationReport report = afterCogPosition
                 ? new OreVeinGenerator(def).generateReportForCogPosition(structureSeed)
                 : new OreVeinGenerator(def).generateReport(structureSeed);
@@ -3447,7 +3508,7 @@ public final class LwjglOreVeinVisualizerApp {
             FrequencyPlacement placement = childFrequencyPlacement(child, structureSeed, motherWorldX, motherWorldZ);
             total += appendRegionDefinitionTree(child, defIndex + 1, placement.seed, placement.anchorX, placement.anchorZ,
                     voxels, totalOreCounts, definitionStats, depth + 1, blocksX, blocksZ, sceneSizeY,
-                    topDown, false, groundEnabled, groundLevel);
+                    topDown, false, groundEnabled, groundLevel, biomeCategory, true);
         }
         return total;
     }
@@ -3551,6 +3612,46 @@ public final class LwjglOreVeinVisualizerApp {
             total += Math.max(0.0, def.distributionFrequency.mean) * chunks;
         }
         return total;
+    }
+
+    private boolean passesBiomeCategory(VeinDefinition def, String biomeCategory, long structureSeed) {
+        double weight = biomeCategoryWeight(def, biomeCategory);
+        if (weight <= 0.0) {
+            return false;
+        }
+        if (weight >= 1.0) {
+            return true;
+        }
+        long seed = structureSeed
+                ^ ((long) def.nameForXml().hashCode() << 32)
+                ^ ((long) biomeCategory.hashCode() * 0x9e3779b97f4a7c15L);
+        return new Random(seed).nextDouble() < weight;
+    }
+
+    private double biomeCategoryWeight(VeinDefinition def, String biomeCategory) {
+        if (biomeCategory == null || def == null || def.biomeGates.isEmpty()) {
+            return 1.0;
+        }
+        String selected = normalizeBiomeCategory(biomeCategory);
+        boolean hasAnyTypeGate = false;
+        double matchingWeight = 0.0;
+        for (BiomeGateEntry gate : def.biomeGates) {
+            if (gate == null || !gate.isType()) {
+                continue;
+            }
+            hasAnyTypeGate = true;
+            if (normalizeBiomeCategory(gate.name).equals(selected)) {
+                matchingWeight += gate.weight;
+            }
+        }
+        if (hasAnyTypeGate) {
+            return matchingWeight;
+        }
+        return 1.0;
+    }
+
+    private String normalizeBiomeCategory(String value) {
+        return value == null ? "" : value.trim().replace("_", "").replace(" ", "").toLowerCase(Locale.ENGLISH);
     }
 
     private FrequencyPlacement childFrequencyPlacement(VeinDefinition child, long parentSeed,
@@ -4033,6 +4134,16 @@ public final class LwjglOreVeinVisualizerApp {
         static final float VOXEL_SIZE = 4.0f;
         private static final int AUTO_POINT_LOD_VOXELS = 600000;
         private static final int RENDER_BATCH_BLOCKS = 128;
+        private static final long MOUSEEVENTF_FROMTOUCH = 0xFF515700L;
+        private static final long MOUSEEVENTF_SIGNATURE_MASK = 0xFFFFFF00L;
+        private static final int WM_POINTERUPDATE = 0x0245;
+        private static final int WM_POINTERDOWN = 0x0246;
+        private static final int WM_POINTERUP = 0x0247;
+        private static final int WM_POINTERCAPTURECHANGED = 0x024C;
+        private static final int POINTER_FLAG_DOWN = 0x00010000;
+        private static final int POINTER_FLAG_UPDATE = 0x00020000;
+        private static final int POINTER_FLAG_UP = 0x00040000;
+        private static final int PT_TOUCH = 0x00000002;
         private RenderScene scene = RenderScene.empty();
         private final List<RenderBatch> renderBatches = new ArrayList<RenderBatch>();
         private boolean displayListDirty = true;
@@ -4044,6 +4155,20 @@ public final class LwjglOreVeinVisualizerApp {
         private int lastX;
         private int lastY;
         private int lastButton;
+        private final Map<Integer, Point> activeTouches = new HashMap<Integer, Point>();
+        private final Set<Integer> viewportPointerIds = new HashSet<Integer>();
+        private boolean touchSupportAttempted;
+        private long lastTouchInstallAttemptMillis;
+        private boolean touchGestureActive;
+        private boolean singleTouchActive;
+        private double lastSingleTouchX;
+        private double lastSingleTouchY;
+        private double lastTouchCenterX;
+        private double lastTouchCenterY;
+        private double lastTouchDistance;
+        private long suppressMouseUntilMillis;
+        private final List<TouchWindowHook> touchWindowHooks = new ArrayList<TouchWindowHook>();
+        private boolean touchRenderQueued;
         private boolean cameraInitialized;
         private boolean lastTopDown;
         private String renderDetail = "Auto";
@@ -4056,6 +4181,9 @@ public final class LwjglOreVeinVisualizerApp {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mousePressed(MouseEvent event) {
+                    if (shouldIgnoreMouseEvent(event)) {
+                        return;
+                    }
                     lastX = event.getX();
                     lastY = event.getY();
                     lastButton = event.getButton();
@@ -4064,6 +4192,9 @@ public final class LwjglOreVeinVisualizerApp {
             addMouseMotionListener(new MouseAdapter() {
                 @Override
                 public void mouseDragged(MouseEvent event) {
+                    if (shouldIgnoreMouseEvent(event)) {
+                        return;
+                    }
                     int dx = event.getX() - lastX;
                     int dy = event.getY() - lastY;
                     if (scene.topDown) {
@@ -4085,20 +4216,23 @@ public final class LwjglOreVeinVisualizerApp {
             addMouseWheelListener(new java.awt.event.MouseWheelListener() {
                 @Override
                 public void mouseWheelMoved(MouseWheelEvent event) {
-                    zoom -= event.getWheelRotation() * 45.0f;
-                    if (zoom > -80.0f) zoom = -80.0f;
-                    if (zoom < -5000.0f) zoom = -5000.0f;
+                    if (shouldIgnoreMouseEvent(event)) {
+                        return;
+                    }
+                    adjustZoom(-event.getWheelRotation() * 45.0f);
                     render();
                 }
             });
             addComponentListener(new ComponentAdapter() {
                 @Override
                 public void componentResized(ComponentEvent event) {
+                    installTouchSupport();
                     render();
                 }
 
                 @Override
                 public void componentShown(ComponentEvent event) {
+                    installTouchSupport();
                     render();
                 }
             });
@@ -4156,8 +4290,423 @@ public final class LwjglOreVeinVisualizerApp {
             return Math.max(min, Math.min(max, value));
         }
 
+        private boolean shouldIgnoreMouseEvent(MouseEvent event) {
+            return System.currentTimeMillis() < suppressMouseUntilMillis || isTouchEmulatedMouseEvent();
+        }
+
+        private boolean isTouchEmulatedMouseEvent() {
+            if (!touchSupportAttempted) {
+                return false;
+            }
+            try {
+                long extraInfo = User32.GetMessageExtraInfo() & 0xFFFFFFFFL;
+                return (extraInfo & MOUSEEVENTF_SIGNATURE_MASK) == MOUSEEVENTF_FROMTOUCH;
+            } catch (Throwable ex) {
+                return false;
+            }
+        }
+
+        private void queueTouchRender() {
+            if (SwingUtilities.isEventDispatchThread()) {
+                render();
+                return;
+            }
+            if (touchRenderQueued) {
+                return;
+            }
+            touchRenderQueued = true;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                    touchRenderQueued = false;
+                    render();
+                }
+            });
+        }
+
+        private void adjustZoom(float delta) {
+            zoom += delta;
+            if (zoom > -80.0f) zoom = -80.0f;
+            if (zoom < -5000.0f) zoom = -5000.0f;
+        }
+
+        private void installTouchSupport() {
+            if (!touchWindowHooks.isEmpty()) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            if (touchSupportAttempted && now - lastTouchInstallAttemptMillis < 500L) {
+                return;
+            }
+            touchSupportAttempted = true;
+            lastTouchInstallAttemptMillis = now;
+            if (!(platformCanvas instanceof PlatformWin32GLCanvas)) {
+                return;
+            }
+            long canvasHwnd = ((PlatformWin32GLCanvas) platformCanvas).hwnd;
+            installTouchHook(canvasHwnd, "canvas");
+            installTouchHook(jawtHwndFor(this), "jawt-canvas");
+            installTouchHook(nativeHwndFor(this), "peer-canvas");
+            Window window = SwingUtilities.getWindowAncestor(this);
+            installTouchHook(jawtHwndFor(window), "jawt-frame");
+            installTouchHook(nativeHwndFor(window), "peer-frame");
+        }
+
+        private void installTouchHook(final long hwnd, final String name) {
+            if (hwnd == 0L) {
+                return;
+            }
+            for (int i = 0; i < touchWindowHooks.size(); i++) {
+                if (touchWindowHooks.get(i).hwnd == hwnd) {
+                    return;
+                }
+            }
+            final TouchWindowHook hook = new TouchWindowHook(hwnd, name);
+            hook.windowProc = WindowProc.create(new WindowProcI() {
+                @Override
+                public long invoke(long messageHwnd, int message, long wParam, long lParam) {
+                    try {
+                        if (isPointerMessage(message) && handlePointerMessage(message, wParam)) {
+                            return 0L;
+                        }
+                        if (message == User32.WM_TOUCH && handleTouchMessage(wParam, lParam)) {
+                            return 0L;
+                        }
+                    } catch (Throwable ex) {}
+                    return User32.nCallWindowProc(hook.previousWindowProc, messageHwnd, message, wParam, lParam);
+                }
+            });
+            hook.previousWindowProc = User32.nSetWindowLongPtr(0L, hwnd, User32.GWL_WNDPROC, hook.windowProc.address());
+            if (hook.previousWindowProc == 0L) {
+                hook.windowProc.free();
+                return;
+            }
+            if (User32.nRegisterTouchWindow(0L, hwnd, User32.TWF_FINETOUCH) == 0) {
+                hook.touchRegistered = false;
+                touchWindowHooks.add(hook);
+                return;
+            }
+            hook.touchRegistered = true;
+            touchWindowHooks.add(hook);
+        }
+
+        private static boolean isPointerMessage(int message) {
+            return message == WM_POINTERDOWN || message == WM_POINTERUPDATE
+                    || message == WM_POINTERUP || message == WM_POINTERCAPTURECHANGED;
+        }
+
+        private static long nativeHwndFor(Component component) {
+            if (component == null) {
+                return 0L;
+            }
+            try {
+                Method getPeer = Component.class.getDeclaredMethod("getPeer");
+                getPeer.setAccessible(true);
+                Object peer = getPeer.invoke(component);
+                if (peer == null) {
+                    return 0L;
+                }
+                Method getHWnd = findMethod(peer.getClass(), "getHWnd");
+                if (getHWnd == null) {
+                    getHWnd = findMethod(peer.getClass(), "getWindow");
+                }
+                if (getHWnd == null) {
+                    return 0L;
+                }
+                getHWnd.setAccessible(true);
+                Object value = getHWnd.invoke(peer);
+                if (value instanceof Number) {
+                    return ((Number) value).longValue();
+                }
+            } catch (Throwable ex) {
+                return 0L;
+            }
+            return 0L;
+        }
+
+        private static long jawtHwndFor(Component component) {
+            if (component == null || !component.isDisplayable()) {
+                return 0L;
+            }
+            JAWTDrawingSurface drawingSurface = null;
+            boolean locked = false;
+            try {
+                drawingSurface = JAWTFunctions.JAWT_GetDrawingSurface(component, PlatformWin32GLCanvas.awt.GetDrawingSurface());
+                if (drawingSurface == null) {
+                    return 0L;
+                }
+                int lock = JAWTFunctions.JAWT_DrawingSurface_Lock(drawingSurface, drawingSurface.Lock());
+                if ((lock & JAWTFunctions.JAWT_LOCK_ERROR) != 0) {
+                    return 0L;
+                }
+                locked = true;
+                JAWTDrawingSurfaceInfo surfaceInfo = JAWTFunctions.JAWT_DrawingSurface_GetDrawingSurfaceInfo(
+                        drawingSurface, drawingSurface.GetDrawingSurfaceInfo());
+                if (surfaceInfo == null) {
+                    return 0L;
+                }
+                try {
+                    long platformInfo = surfaceInfo.platformInfo();
+                    if (platformInfo == 0L) {
+                        return 0L;
+                    }
+                    return JAWTWin32DrawingSurfaceInfo.create(platformInfo).hwnd();
+                } finally {
+                    JAWTFunctions.JAWT_DrawingSurface_FreeDrawingSurfaceInfo(
+                            surfaceInfo, drawingSurface.FreeDrawingSurfaceInfo());
+                }
+            } catch (Throwable ex) {
+                return 0L;
+            } finally {
+                if (drawingSurface != null) {
+                    if (locked) {
+                        JAWTFunctions.JAWT_DrawingSurface_Unlock(drawingSurface, drawingSurface.Unlock());
+                    }
+                    JAWTFunctions.JAWT_FreeDrawingSurface(drawingSurface, PlatformWin32GLCanvas.awt.FreeDrawingSurface());
+                }
+            }
+        }
+
+        private static Method findMethod(Class<?> type, String name) {
+            Class<?> cursor = type;
+            while (cursor != null) {
+                try {
+                    return cursor.getDeclaredMethod(name);
+                } catch (NoSuchMethodException ex) {
+                    cursor = cursor.getSuperclass();
+                }
+            }
+            return null;
+        }
+
+        private boolean handlePointerMessage(int message, long wParam) {
+            int pointerId = (int) (wParam & 0xFFFFL);
+            if (message == WM_POINTERCAPTURECHANGED) {
+                activeTouches.clear();
+                touchGestureActive = false;
+                singleTouchActive = false;
+                return true;
+            }
+            PointerInfo pointer = PointerApi.getPointerInfo(pointerId);
+            if (pointer == null || pointer.pointerType != PT_TOUCH) {
+                return false;
+            }
+            Point point = new Point(pointer.x, pointer.y);
+            SwingUtilities.convertPointFromScreen(point, this);
+            boolean pointerInViewport = contains(point);
+            if (message == WM_POINTERDOWN || (pointer.pointerFlags & POINTER_FLAG_DOWN) != 0) {
+                if (!pointerInViewport) {
+                    viewportPointerIds.remove(Integer.valueOf(pointer.pointerId));
+                    return false;
+                }
+                viewportPointerIds.add(Integer.valueOf(pointer.pointerId));
+            } else if (!viewportPointerIds.contains(Integer.valueOf(pointer.pointerId))) {
+                return false;
+            }
+            if (message == WM_POINTERUP || (pointer.pointerFlags & POINTER_FLAG_UP) != 0) {
+                activeTouches.remove(Integer.valueOf(pointer.pointerId));
+                viewportPointerIds.remove(Integer.valueOf(pointer.pointerId));
+            } else if (message == WM_POINTERDOWN || message == WM_POINTERUPDATE
+                    || (pointer.pointerFlags & (POINTER_FLAG_DOWN | POINTER_FLAG_UPDATE)) != 0) {
+                activeTouches.put(Integer.valueOf(pointer.pointerId), point);
+            }
+            suppressMouseUntilMillis = System.currentTimeMillis() + 500L;
+            if (activeTouches.size() >= 2) {
+                applyTouchPanZoom();
+                touchGestureActive = true;
+                singleTouchActive = false;
+                queueTouchRender();
+                return true;
+            }
+            if (activeTouches.size() == 1) {
+                applySingleTouchDrag();
+                touchGestureActive = false;
+                singleTouchActive = true;
+                queueTouchRender();
+                return true;
+            }
+            touchGestureActive = false;
+            singleTouchActive = false;
+            return true;
+        }
+
+        private void uninstallTouchSupport() {
+            for (int i = 0; i < touchWindowHooks.size(); i++) {
+                TouchWindowHook hook = touchWindowHooks.get(i);
+                if (hook.previousWindowProc != 0L) {
+                    User32.nSetWindowLongPtr(0L, hook.hwnd, User32.GWL_WNDPROC, hook.previousWindowProc);
+                }
+                if (hook.touchRegistered) {
+                    User32.nUnregisterTouchWindow(0L, hook.hwnd);
+                }
+                if (hook.windowProc != null) {
+                    hook.windowProc.free();
+                }
+            }
+            touchWindowHooks.clear();
+            activeTouches.clear();
+            viewportPointerIds.clear();
+            touchGestureActive = false;
+            singleTouchActive = false;
+        }
+
+        private boolean handleTouchMessage(long wParam, long lParam) {
+            int touchCount = (int) (wParam & 0xFFFFL);
+            if (touchCount <= 0) {
+                return false;
+            }
+            TOUCHINPUT.Buffer inputs = TOUCHINPUT.calloc(touchCount);
+            try {
+                if (!User32.GetTouchInputInfo(null, lParam, inputs, TOUCHINPUT.SIZEOF)) {
+                    return false;
+                }
+                for (int i = 0; i < touchCount; i++) {
+                    inputs.position(i);
+                    int id = inputs.dwID();
+                    int flags = inputs.dwFlags();
+                    if ((flags & User32.TOUCHEVENTF_UP) != 0) {
+                        activeTouches.remove(Integer.valueOf(id));
+                    } else if ((flags & (User32.TOUCHEVENTF_DOWN | User32.TOUCHEVENTF_MOVE)) != 0) {
+                        Point point = new Point(inputs.x() / 100, inputs.y() / 100);
+                        SwingUtilities.convertPointFromScreen(point, this);
+                        activeTouches.put(Integer.valueOf(id), point);
+                    }
+                }
+            } finally {
+                inputs.free();
+                User32.nCloseTouchInputHandle(0L, lParam);
+            }
+            if (activeTouches.size() >= 2) {
+                applyTouchPanZoom();
+                suppressMouseUntilMillis = System.currentTimeMillis() + 300L;
+                touchGestureActive = true;
+                singleTouchActive = false;
+                queueTouchRender();
+                return true;
+            }
+            if (activeTouches.size() == 1) {
+                applySingleTouchDrag();
+                suppressMouseUntilMillis = System.currentTimeMillis() + 300L;
+                touchGestureActive = false;
+                singleTouchActive = true;
+                queueTouchRender();
+                return true;
+            }
+            touchGestureActive = false;
+            singleTouchActive = false;
+            return true;
+        }
+
+        private void applyTouchPanZoom() {
+            List<Integer> ids = new ArrayList<Integer>(activeTouches.keySet());
+            Collections.sort(ids);
+            Point first = activeTouches.get(ids.get(0));
+            Point second = activeTouches.get(ids.get(1));
+            double centerX = (first.x + second.x) * 0.5;
+            double centerY = (first.y + second.y) * 0.5;
+            double dx = first.x - second.x;
+            double dy = first.y - second.y;
+            double distance = Math.sqrt(dx * dx + dy * dy);
+            if (touchGestureActive) {
+                panX += (float) (centerX - lastTouchCenterX);
+                panY -= (float) (centerY - lastTouchCenterY);
+                adjustZoom((float) ((distance - lastTouchDistance) * 2.2));
+            }
+            lastTouchCenterX = centerX;
+            lastTouchCenterY = centerY;
+            lastTouchDistance = distance;
+        }
+
+        private void applySingleTouchDrag() {
+            Point point = activeTouches.values().iterator().next();
+            if (singleTouchActive) {
+                double dx = point.x - lastSingleTouchX;
+                double dy = point.y - lastSingleTouchY;
+                if (scene.topDown) {
+                    panX += (float) dx;
+                    panY -= (float) dy;
+                } else {
+                    rotateY += dx * 0.45f;
+                    rotateX += dy * 0.45f;
+                    rotateX = clampFloat(rotateX, -85.0f, 85.0f);
+                }
+            }
+            lastSingleTouchX = point.x;
+            lastSingleTouchY = point.y;
+        }
+
+        private static final class TouchWindowHook {
+            final long hwnd;
+            final String name;
+            long previousWindowProc;
+            WindowProc windowProc;
+            boolean touchRegistered;
+
+            TouchWindowHook(long hwnd, String name) {
+                this.hwnd = hwnd;
+                this.name = name;
+            }
+        }
+
+        private static final class PointerInfo {
+            final int pointerType;
+            final int pointerId;
+            final int pointerFlags;
+            final int x;
+            final int y;
+
+            PointerInfo(int pointerType, int pointerId, int pointerFlags, int x, int y) {
+                this.pointerType = pointerType;
+                this.pointerId = pointerId;
+                this.pointerFlags = pointerFlags;
+                this.x = x;
+                this.y = y;
+            }
+        }
+
+        private static final class PointerApi {
+            private static final int POINTER_INFO_SIZE = 96;
+            private static final int POINTER_TYPE_OFFSET = 0;
+            private static final int POINTER_ID_OFFSET = 4;
+            private static final int POINTER_FLAGS_OFFSET = 12;
+            private static final int POINTER_PIXEL_X_OFFSET = 32;
+            private static final int POINTER_PIXEL_Y_OFFSET = 36;
+            private static final SharedLibrary USER32_LIBRARY = APIUtil.apiCreateLibrary("user32");
+            private static final long GET_POINTER_INFO = USER32_LIBRARY == null
+                    ? 0L
+                    : APIUtil.apiGetFunctionAddressOptional(USER32_LIBRARY, "GetPointerInfo");
+
+            static PointerInfo getPointerInfo(int pointerId) {
+                if (GET_POINTER_INFO == 0L) {
+                    return null;
+                }
+                try (MemoryStack stack = MemoryStack.stackPush()) {
+                    long pointerInfo = stack.ncalloc(8, POINTER_INFO_SIZE, 1);
+                    int ok = JNI.callPI(pointerId, pointerInfo, GET_POINTER_INFO);
+                    if (ok == 0) {
+                        return null;
+                    }
+                    return new PointerInfo(
+                            MemoryUtil.memGetInt(pointerInfo + POINTER_TYPE_OFFSET),
+                            MemoryUtil.memGetInt(pointerInfo + POINTER_ID_OFFSET),
+                            MemoryUtil.memGetInt(pointerInfo + POINTER_FLAGS_OFFSET),
+                            MemoryUtil.memGetInt(pointerInfo + POINTER_PIXEL_X_OFFSET),
+                            MemoryUtil.memGetInt(pointerInfo + POINTER_PIXEL_Y_OFFSET));
+                } catch (Throwable ex) {
+                    return null;
+                }
+            }
+        }
+
+        @Override
+        public void removeNotify() {
+            uninstallTouchSupport();
+            super.removeNotify();
+        }
+
         @Override
         public void initGL() {
+            installTouchSupport();
             GL.createCapabilities();
             GL11.glClearColor(18.0f / 255.0f, 20.0f / 255.0f, 24.0f / 255.0f, 1.0f);
             GL11.glEnable(GL11.GL_DEPTH_TEST);

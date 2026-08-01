@@ -321,6 +321,11 @@ public final class LwjglOreVeinVisualizerApp {
         JButton loadXml = new JButton("Load XML");
         JButton exportRender = new JButton("Export Render");
         JButton randomSeed = new JButton("Random Seed");
+        distributionBox.setLightWeightPopupEnabled(false);
+        modeBox.setLightWeightPopupEnabled(false);
+        regionViewBox.setLightWeightPopupEnabled(false);
+        regionBiomeBox.setLightWeightPopupEnabled(false);
+        renderDetailBox.setLightWeightPopupEnabled(false);
         regionViewBox.setPreferredSize(new Dimension(105, 24));
         regionBiomeBox.setPreferredSize(new Dimension(130, 24));
         renderDetailBox.setPreferredSize(new Dimension(100, 24));
